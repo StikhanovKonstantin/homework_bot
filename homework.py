@@ -9,8 +9,6 @@ from typing import Optional, Dict, Any, List
 from telebot import TeleBot
 from dotenv import load_dotenv
 
-from exceptions.api_error import PracticumApiError
-
 
 load_dotenv()
 
@@ -70,50 +68,70 @@ def send_message(bot: TeleBot, message: str) -> None:
 def get_api_answer(timestamp: int) -> Dict[str, Any]:
     """Получает ответ с API-сервиса Яндекс Домашка."""
     try:
-        homework_statuses = requests.get(
+        response = requests.get(
             url=ENDPOINT, headers=HEADERS, params={'from_date': timestamp}
         )
-        if homework_statuses.status_code == HTTPStatus.NOT_FOUND:
-            raise PracticumApiError
-        return homework_statuses.json()
-    except PracticumApiError:
-        logger.error(
-            f'Сбой в работе программы: Эндпоинт: {ENDPOINT} недоступен. '
-            f'Код ответа API: {homework_statuses.status_code}.'
+    except requests.RequestException as e:
+        message = f'Ошибка запроса к API. Получена ошибка: {e}.'
+        logger.error(message)
+        return {}
+    if response.status_code != HTTPStatus.OK:
+        raise requests.HTTPError(
+            f'Ошибка HTTP: статус-код - {response.status_code}. '
+            f'Ожидался статус: {HTTPStatus.OK}'
         )
+    try:
+        response_data = response.json()
+    except ValueError as e:
+        message = 'Ошибка декодирования JSON из ответа API'
+        logger.error(message)
+        raise ValueError(message) from e
+    return response_data
 
 
 def check_response(response: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Проверяет данные из словаря response."""
-    try:
-        if (
-            'homeworks' not in response
-            or 'current_date' not in response
-        ):
+    """
+    Проверяет данные из словаря API, проверяет на наличие ключей и формата.
+
+    Ожидается, что response - словарь с ключами:
+    'homeworks' - список домашних заданий(1 задание - словарь);
+    'current_date' - числовое значение(формат UNIX-время).
+
+    Возвращает список домашних заданий.
+    """
+    # Множество хранит обязательные ключи из словаря API.
+    keys: set = {'homeworks', 'current_date'}
+    # Проверяем на нужную структуру данных.
+    if not isinstance(response, dict):
+        logger.error('Ожидался словарь с данными API.')
+        raise TypeError
+    # Проверяем наличие всех ключей.
+    for key in keys:
+        if key not in response:
             logger.error(
-                'Отсутствие обязательного ключа в словаре.'
+                f'Обязательный ключ `{key}` отсутсвует в словаре API.'
             )
-        elif not response.get('homeworks'):
-            logger.debug(
-                'Список домашек пуст.'
-            )
-    except KeyError:
-        logger.error(
-            'В словаре из API-домашки отсутствуют ключи ключ `homeworks` '
-            'или `current_date`.'
-        )
-    except TypeError:
-        logger.error(
-            'В словаре из API-домашки под ключом `homeworks `'
-            'должен быть список словарей.'
-        )
-    return response.get('homeworks')
+            raise KeyError
+    homeworks = response.get('homeworks')
+    if not isinstance(homeworks, list):
+        logger.error('Значение под ключом `homeworks` должно быть списком!')
+        raise TypeError
+    if not homeworks:
+        logger.error('Список домашек пуст.')
+        raise ValueError
+
+    return homeworks
 
 
 def parse_status(homework: Dict[str, Any]) -> Optional[str]:
     """
-    Разбирает данные из словаря, подготавливает
-    данные для отправки изменений.
+    Разбирает данные из словаря с домашней работой.
+
+    Ожидается, что в словаре `homework` должны быть ключи:
+    `homework_name` - название домашки;
+    `homework_status` - статус домашки(успешно, отклонена, взята на проверку);
+
+    Подготавливает данные для отправки сообщения в Телеграмм.
     """
     if not homework:
         logger.error('Пустой ответ от API Яндекс Домашка.')
@@ -122,6 +140,7 @@ def parse_status(homework: Dict[str, Any]) -> Optional[str]:
     homework_status = homework.get('status')
     if homework_name is None or homework_status not in HOMEWORK_VERDICTS:
         logger.error('Неверный формат данных для домашней работы.')
+        raise KeyError
     verdict = HOMEWORK_VERDICTS.get(homework_status)
 
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
