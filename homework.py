@@ -7,7 +7,10 @@ from http import HTTPStatus
 from typing import Optional, Any
 
 from telebot import TeleBot
+from telebot.apihelper import ApiException
 from dotenv import load_dotenv
+
+from exceptions.api_request_error import ApiHomeworkError
 
 
 load_dotenv()
@@ -55,8 +58,13 @@ def check_tokens() -> bool:
 
 def send_message(bot: TeleBot, message: str) -> None:
     """Отправляет сообщение пользователю в чат Телеграмм."""
-    bot.send_message(TELEGRAM_CHAT_ID, message)
-    logger.debug(f'Сообщение отправлено успешно: {message}.')
+    try:
+        bot.send_message(TELEGRAM_CHAT_ID, message)
+        logger.debug(f'Сообщение отправлено успешно: {message}.')
+    except ApiException as e:
+        logger.error(f'Возникла ошибка API Telebot: {str(e)}')
+    except requests.exceptions.RequestException as e:
+        logger.error(f'Ошибка запроса: {str(e)}')
 
 
 def get_api_answer(timestamp: int) -> dict[str, Any]:
@@ -71,7 +79,7 @@ def get_api_answer(timestamp: int) -> dict[str, Any]:
         ) from e
 
     if response.status_code != HTTPStatus.OK:
-        raise requests.HTTPError(
+        raise ApiHomeworkError(
             f'Ошибка HTTP: статус-код - {response.status_code}. '
             f'Ожидался статус: {HTTPStatus.OK}'
         )
@@ -92,12 +100,9 @@ def check_response(response: dict[str, Any]) -> list[dict[str, Any]]:
 
     Возвращает список домашних заданий.
     """
-    # Множество хранит обязательные ключи из словаря API.
     keys: set = {'homeworks', 'current_date'}
-    # Проверяем на нужную структуру данных.
     if not isinstance(response, dict):
         raise TypeError('Ожидался словарь с данными API.')
-    # Проверяем наличие всех ключей.
     for key in keys:
         if key not in response:
             raise KeyError(
@@ -135,15 +140,6 @@ def parse_status(homework: dict[str, Any]) -> Optional[str]:
 
 def main() -> None:
     """Основная логика работы бота."""
-    # Настраиваем логирование.
-    logger.setLevel(logging.DEBUG)
-    handler = logging.StreamHandler(stream=sys.stdout)
-    logger.addHandler(handler)
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    handler.setFormatter(formatter)
-    # Создаем объект класса бота
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
     # Проверяем наличие всех переменных окружения.
@@ -181,4 +177,12 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    # Настраиваем логирование.
+    logger.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler(stream=sys.stdout)
+    logger.addHandler(handler)
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    handler.setFormatter(formatter)
     main()
