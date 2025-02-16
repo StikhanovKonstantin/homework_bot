@@ -7,7 +7,6 @@ from http import HTTPStatus
 from typing import Optional, Any
 
 from telebot import TeleBot
-from telebot.apihelper import ApiException
 from dotenv import load_dotenv
 
 from exceptions.api_request_error import ApiHomeworkError
@@ -56,15 +55,10 @@ def check_tokens() -> bool:
     return True
 
 
-def send_message(bot: TeleBot, message: str) -> None:
+def send_message(bot: TeleBot, message: str) -> bool:
     """Отправляет сообщение пользователю в чат Телеграмм."""
-    try:
-        bot.send_message(TELEGRAM_CHAT_ID, message)
-        logger.debug(f'Сообщение отправлено успешно: {message}.')
-    except ApiException as e:
-        logger.error(f'Возникла ошибка API Telebot: {str(e)}')
-    except requests.exceptions.RequestException as e:
-        logger.error(f'Ошибка запроса: {str(e)}')
+    bot.send_message(TELEGRAM_CHAT_ID, message)
+    logger.debug(f'Сообщение отправлено успешно: {message}.')
 
 
 def get_api_answer(timestamp: int) -> dict[str, Any]:
@@ -156,7 +150,6 @@ def main() -> None:
                 message = parse_status(homework)
                 if message:
                     send_message(bot, message)
-                    logger.debug(f'Сообщение отправлено успешно: {message}.')
             timestamp = response.get('current_date', timestamp)
             last_error_message = None
 
